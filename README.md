@@ -1,5 +1,7 @@
 # Golang Tradningview Binance Webhook
 
+Fork from: https://github.com/cryptothedev/tradingview-binance-webhook
+
 
 ## Dependencies
 
