@@ -17,7 +17,7 @@ type Service interface {
 	Long(command *models.Command) error
 	Short(command *models.Command) error
 
-	tradeSetup(command models.Command)
+	tradeSetup(command *models.Command)
 	openOrder(symbol, quantity string, side futures.SideType, positionSide futures.PositionSideType)
 	getDecimalsInfo(symbol string) (int, int)
 	calculateQuantity(symbol string, amountUSD int64, quantityPrecision int) float64
@@ -54,6 +54,9 @@ func (s *service) Long(command *models.Command) error {
 	if !isFoundTokenWL {
 		return errors.New("Not found in whlitelist token")
 	}
+
+	// Setup
+	s.tradeSetup(command)
 
 	// GetDecimalsInfo
 	pricePrecision, quantityPrecision := s.getDecimalsInfo(command.Symbol)
@@ -135,6 +138,9 @@ func (s *service) Short(command *models.Command) error {
 		return errors.New("Not found in whlitelist token")
 	}
 
+	// Setup
+	s.tradeSetup(command)
+
 	// GetDecimalsInfo
 	pricePrecision, quantityPrecision := s.getDecimalsInfo(command.Symbol)
 
@@ -199,7 +205,7 @@ func (s *service) Short(command *models.Command) error {
 	return nil
 }
 
-func (s *service) tradeSetup(command models.Command) {
+func (s *service) tradeSetup(command *models.Command) {
 
 	// Change Leverage
 	respChangeLeverage, err := s.client.NewChangeLeverageService().
