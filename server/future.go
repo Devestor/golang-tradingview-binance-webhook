@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -34,12 +35,13 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 		ctx = context.Background()
 	}
 
-	data := &models.RequestFromTradingViewAlert{}
-	if err := render.Bind(r, data); err != nil {
-		render.Render(w, r, ErrInvalidRequest(err))
-		return
+	reqBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Println(err)
 	}
-	command := parseRawCommand(data.Mode)
+
+	strReqBody := string(reqBody)
+	command := parseRawCommand(strReqBody)
 
 	switch command.Side {
 	case futures.PositionSideTypeLong:
@@ -78,9 +80,9 @@ func parseRawCommand(rawCommand string) *models.Command {
 	c.IsSL = arr[4] == "true"
 
 	// Side
-	if arr[1] == string(futures.PositionSideTypeLong) {
+	if strings.ToUpper(arr[1]) == strings.ToUpper(string(futures.PositionSideTypeLong)) {
 		c.Side = futures.PositionSideTypeLong
-	} else if arr[1] == string(futures.PositionSideTypeShort) {
+	} else if strings.ToUpper(arr[1]) == strings.ToUpper(string(futures.PositionSideTypeShort)) {
 		c.Side = futures.PositionSideTypeShort
 	}
 
