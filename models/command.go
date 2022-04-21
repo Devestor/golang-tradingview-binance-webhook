@@ -10,4 +10,5 @@ type Command struct {
 	AmountUSD int64
 	IsTP      bool
 	IsSL      bool
+	IsCheckWL bool
 }

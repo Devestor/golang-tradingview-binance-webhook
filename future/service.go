@@ -21,7 +21,7 @@ type Service interface {
 	openOrder(symbol, quantity string, side futures.SideType, positionSide futures.PositionSideType)
 	getDecimalsInfo(symbol string) (int, int)
 	calculateQuantity(symbol string, amountUSD int64, quantityPrecision int) float64
-	calculateTpSL(symbol string, side futures.PositionSideType, pricePrecision int) (string, string)
+	calculateTpSL(symbol string, side futures.PositionSideType, pricePrecision int) (string, string, error)
 	cancelOpenOrders(command models.Command)
 }
 
@@ -44,14 +44,17 @@ func (s *service) Long(command *models.Command) error {
 
 	// Check Whitelist
 	var isFoundTokenWL bool
-	for i := range s.config.TokenWhitelist {
-		if s.config.TokenWhitelist[i] == command.Symbol {
-			isFoundTokenWL = true
-			break
+	if command.IsCheckWL {
+		for i := range s.config.TokenWhitelist {
+			if s.config.TokenWhitelist[i] == command.Symbol {
+				isFoundTokenWL = true
+				break
+			}
 		}
+
 	}
 
-	if !isFoundTokenWL {
+	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
 	}
 
@@ -76,7 +79,10 @@ func (s *service) Long(command *models.Command) error {
 	}
 
 	// Calcualte TP and SL
-	stopLoss, takeProfit := s.calculateTpSL(command.Symbol, futures.PositionSideTypeLong, pricePrecision)
+	stopLoss, takeProfit, err := s.calculateTpSL(command.Symbol, futures.PositionSideTypeLong, pricePrecision)
+	if err != nil {
+		return err
+	}
 
 	// Enable TakeProfit
 	if command.IsTP {
@@ -127,14 +133,16 @@ func (s *service) Short(command *models.Command) error {
 
 	// Check Whitelist
 	var isFoundTokenWL bool
-	for i := range s.config.TokenWhitelist {
-		if s.config.TokenWhitelist[i] == command.Symbol {
-			isFoundTokenWL = true
-			break
+	if command.IsCheckWL {
+		for i := range s.config.TokenWhitelist {
+			if s.config.TokenWhitelist[i] == command.Symbol {
+				isFoundTokenWL = true
+				break
+			}
 		}
 	}
 
-	if !isFoundTokenWL {
+	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
 	}
 
@@ -159,7 +167,10 @@ func (s *service) Short(command *models.Command) error {
 	}
 
 	// Calcualte TP and SL
-	stopLoss, takeProfit := s.calculateTpSL(command.Symbol, futures.PositionSideTypeShort, pricePrecision)
+	stopLoss, takeProfit, err := s.calculateTpSL(command.Symbol, futures.PositionSideTypeShort, pricePrecision)
+	if err != nil {
+		return err
+	}
 
 	// Enable TakeProfit
 	if command.IsTP {
@@ -293,10 +304,11 @@ func (s *service) calculateQuantity(symbol string, amountUSD int64, quantityPrec
 	return leverageQuantity
 }
 
-func (s *service) calculateTpSL(symbol string, side futures.PositionSideType, pricePrecision int) (string, string) {
+func (s *service) calculateTpSL(symbol string, side futures.PositionSideType, pricePrecision int) (string, string, error) {
 	res1, err := s.client.NewGetPositionRiskService().Symbol(symbol).Do(context.Background())
 	if err != nil {
 		log.Println("CalculateTpSL: ", err)
+		return "", "", err
 	}
 	var position *futures.PositionRisk
 	for _, v := range res1 {
@@ -312,6 +324,7 @@ func (s *service) calculateTpSL(symbol string, side futures.PositionSideType, pr
 	fPrice, err := strconv.ParseFloat(price, 64)
 	if err != nil {
 		fmt.Println("CalculateTpSL2: ", err)
+		return "", "", err
 	}
 
 	if side == "LONG" {
@@ -320,17 +333,17 @@ func (s *service) calculateTpSL(symbol string, side futures.PositionSideType, pr
 		takeProfit := (fPrice * (100 + s.config.TakeProfitPercentage)) / 100
 
 		fmt.Printf("Long| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)))
-		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision))
+		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)), nil
 	} else if side == "SHORT" {
 
 		stopLoss := (fPrice * (100 + s.config.StopLossPercentage)) / 100
 		takeProfit := (fPrice * (100 - s.config.TakeProfitPercentage)) / 100
 
 		fmt.Printf("Short| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)))
-		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision))
+		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)), nil
 	}
 
-	return "0", "0"
+	return "0", "0", nil
 }
 
 func (s *service) cancelOpenOrders(command models.Command) {

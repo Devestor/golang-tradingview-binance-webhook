@@ -66,3 +66,11 @@ ngrok http 6464
 copy Forwarding https:xxxxx.ngrok.io to tradingview webhook
 ```
 
+
+## Example
+Symbol_Side_Amount_IsTP_IsSL_IsCheckWL
+
+```sh
+{{ticker}}_LONG_50_true_false_false
+```
+

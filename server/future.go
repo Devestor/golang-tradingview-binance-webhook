@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -38,10 +39,19 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Println(err)
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
 	}
 
 	strReqBody := string(reqBody)
-	command := parseRawCommand(strReqBody)
+	command, err := parseRawCommand(strReqBody)
+	if err != nil {
+		log.Println(err)
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	log.Printf("Command: %s\n Symbol: %s, Side: %s, Amount: %d, TP: %t, SL: %t, CheckWL: %t\n", strReqBody, command.Symbol, command.Side, command.AmountUSD, command.IsTP, command.IsSL, command.IsCheckWL)
 
 	switch command.Side {
 	case futures.PositionSideTypeLong:
@@ -69,15 +79,28 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 	render.Respond(w, r, SuccessResponse(nil, "success"))
 }
 
-func parseRawCommand(rawCommand string) *models.Command {
-
+func parseRawCommand(rawCommand string) (*models.Command, error) {
 	arr := strings.Split(rawCommand, "_")
 
 	c := &models.Command{}
 
-	c.Symbol = arr[0]
-	c.IsTP = arr[3] == "true"
-	c.IsSL = arr[4] == "true"
+	if len(arr) < 1 {
+		return nil, errors.New("raw command error")
+	}
+
+	c.Symbol = arr[0] // 1
+
+	if len(arr) >= 4 {
+		c.IsTP = arr[3] == "true" // 4
+	}
+
+	if len(arr) >= 5 {
+		c.IsSL = arr[4] == "true" // 5
+	}
+
+	if len(arr) >= 6 {
+		c.IsCheckWL = arr[5] == "true" // 6
+	}
 
 	// Side
 	if strings.ToUpper(arr[1]) == strings.ToUpper(string(futures.PositionSideTypeLong)) {
@@ -90,5 +113,5 @@ func parseRawCommand(rawCommand string) *models.Command {
 	intAmountUSD, _ := strconv.Atoi(arr[2])
 	c.AmountUSD = int64(intAmountUSD)
 
-	return c
+	return c, nil
 }
