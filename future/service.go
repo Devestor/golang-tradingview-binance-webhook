@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/adshao/go-binance/v2/futures"
 
@@ -26,8 +27,9 @@ type Service interface {
 }
 
 type service struct {
-	config *models.EnvConfig
-	client *futures.Client
+	stateOrderBooks map[string]*models.OrderBook
+	config          *models.EnvConfig
+	client          *futures.Client
 }
 
 func NewService(
@@ -36,8 +38,9 @@ func NewService(
 	client *futures.Client,
 ) Service {
 	return &service{
-		config: config,
-		client: client,
+		config:          config,
+		stateOrderBooks: stateOrderBooks,
+		client:          client,
 	}
 }
 
@@ -57,6 +60,11 @@ func (s *service) Long(command *models.Command) error {
 
 	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
+	}
+
+	if s.isDelayOpenOrder(command) {
+		log.Println("Delay open order")
+		return errors.New("Delay open order")
 	}
 
 	// Setup
@@ -145,6 +153,11 @@ func (s *service) Short(command *models.Command) error {
 
 	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
+	}
+
+	if s.isDelayOpenOrder(command) {
+		log.Println("Delay open order")
+		return errors.New("Delay open order")
 	}
 
 	// Setup
@@ -352,6 +365,40 @@ func (s *service) cancelOpenOrders(command models.Command) {
 	if err != nil {
 		fmt.Println("CancelOpenOrders: ", err)
 	}
+}
+
+// true = delay, false = not delay
+func (s *service) isDelayOpenOrder(command *models.Command) bool {
+	var diff time.Duration
+	var isFirst bool
+	sk := command.Symbol + string(command.Side)
+	if s.stateOrderBooks[sk] == nil { // First
+		isFirst = true
+		s.stateOrderBooks[sk] = &models.OrderBook{
+			Side:      string(command.Side),
+			TimeStamp: time.Now(),
+		}
+		return false
+	}
+
+	// compare
+	diff = time.Now().Sub(s.stateOrderBooks[sk].TimeStamp)
+	fmt.Println("Key: ", sk)
+	fmt.Println("Diff time: ", diff)
+	fmt.Println("Diff time seconds: ", diff.Seconds())
+	if isFirst || diff.Seconds() >= 330 { // 5.5min
+		// Open Order
+		fmt.Println("Open Order: Diff is ", diff.Seconds())
+
+		s.stateOrderBooks[sk] = &models.OrderBook{
+			Side:      string(command.Side),
+			TimeStamp: time.Now(),
+		}
+
+		return false
+	}
+
+	return true
 }
 
 func round(num float64) int {

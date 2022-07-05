@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type EnvConfig struct {
 	BinanceAPIKey        string
 	BinanceAPISecret     string
@@ -8,4 +10,9 @@ type EnvConfig struct {
 	StopLossPercentage   float64
 	Port                 string
 	TokenWhitelist       []string
+}
+
+type OrderBook struct {
+	Side      string
+	TimeStamp time.Time
 }
