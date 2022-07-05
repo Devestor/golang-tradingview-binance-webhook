@@ -32,6 +32,7 @@ type service struct {
 
 func NewService(
 	config *models.EnvConfig,
+	stateOrderBooks map[string]*models.OrderBook,
 	client *futures.Client,
 ) Service {
 	return &service{

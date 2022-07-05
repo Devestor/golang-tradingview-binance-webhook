@@ -44,6 +44,7 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 	}
 
 	strReqBody := string(reqBody)
+	// Parde Command
 	command, err := parseRawCommand(strReqBody)
 	if err != nil {
 		log.Println(err)
@@ -53,8 +54,9 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 
 	log.Printf("Command: %s\n Symbol: %s, Side: %s, Amount: %d, TP: %t, SL: %t, CheckWL: %t\n", strReqBody, command.Symbol, command.Side, command.AmountUSD, command.IsTP, command.IsSL, command.IsCheckWL)
 
+	// Side
 	switch command.Side {
-	case futures.PositionSideTypeLong:
+	case futures.PositionSideTypeLong: // Long
 		err := h.s.Long(command)
 		if err != nil {
 			log.Println(err)
@@ -63,7 +65,7 @@ func (h *futureHandler) receiveCommandFromTradingView(w http.ResponseWriter, r *
 		}
 
 		render.Respond(w, r, SuccessResponse(nil, "success"))
-	case futures.PositionSideTypeShort:
+	case futures.PositionSideTypeShort: // Short
 		err := h.s.Short(command)
 		if err != nil {
 			log.Println(err)

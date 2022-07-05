@@ -56,10 +56,12 @@ func main() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
+	stateOrderBooks := make(map[string]*models.OrderBook)
+
 	futuresClient := binance.NewFuturesClient(config.BinanceAPIKey, config.BinanceAPISecret) // USDT-M Futures
 
 	var futureSvc future.Service
-	futureSvc = future.NewService(&config, futuresClient)
+	futureSvc = future.NewService(&config, stateOrderBooks, futuresClient)
 
 	srv := server.New(futuresClient, futureSvc)
 
@@ -75,37 +77,5 @@ func main() {
 	}()
 
 	log.Println("terminated", <-errs)
-
-	// command := Command{
-	// 	Symbol:    "KNCUSDT",
-	// 	Side:      futures.PositionSideTypeLong,
-	// 	AmountUSD: 50,
-	// 	IsTP:      true,
-	// 	IsSL:      false,
-	// }
-
-	// Setup
-	// TradeSetup(futuresClient, command)
-
-	// GetDecimalsInfo
-	// pricePrecision, quantityPrecision := GetDecimalsInfo(futuresClient, command.Symbol)
-
-	// quantity := CalculateQuantity(
-	// 	futuresClient,
-	// 	command.Symbol,
-	// 	command.AmountUSD,
-	// 	quantityPrecision,
-	// )
-
-	// switch command.Side {
-	// case futures.PositionSideTypeLong:
-	// 	Long(futuresClient, command, pricePrecision, fmt.Sprintf("%.0f", quantity))
-	// case futures.PositionSideTypeShort:
-	// 	Short(futuresClient, command, pricePrecision, fmt.Sprintf("%.0f", quantity))
-	// default:
-	// 	fmt.Printf("%s.\n", command.Side)
-	// }
-
-	// CancelOpenOrders(futuresClient, command)
 
 }
