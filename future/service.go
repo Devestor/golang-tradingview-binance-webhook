@@ -17,6 +17,8 @@ import (
 type Service interface {
 	Long(command *models.Command) error
 	Short(command *models.Command) error
+	GetPositionRisk(command *models.Command) (*futures.PositionRisk, error)
+	CheckPositionRatio(command *models.Command, entryPrice, markPrice float64) (bool, error)
 
 	tradeSetup(command *models.Command)
 	openOrder(symbol, quantity string, side futures.SideType, positionSide futures.PositionSideType)
@@ -58,13 +60,35 @@ func (s *service) Long(command *models.Command) error {
 
 	}
 
+	// Check Token Whitelist
 	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
 	}
 
+	// Delay open order
 	if s.isDelayOpenOrder(command) {
 		log.Println("Delay open order")
 		return errors.New("Delay open order")
+	}
+
+	// GetPositionRisk
+	positionRisk, err := s.GetPositionRisk(command)
+	if err != nil {
+		return err
+	}
+
+	// Check Position Raito
+	var entryPrice, markPrice float64
+	if f, err := strconv.ParseFloat(positionRisk.EntryPrice, 64); err == nil {
+		entryPrice = f
+	}
+	if f, err := strconv.ParseFloat(positionRisk.MarkPrice, 64); err == nil {
+		markPrice = f
+	}
+
+	canOpenOrder, err := s.CheckPositionRatio(command, entryPrice, markPrice)
+	if !canOpenOrder {
+		return err
 	}
 
 	// Setup
@@ -151,13 +175,35 @@ func (s *service) Short(command *models.Command) error {
 		}
 	}
 
+	// Check Token Whitelist
 	if !isFoundTokenWL && command.IsCheckWL {
 		return errors.New("Not found in whlitelist token")
 	}
 
+	// Delay open order
 	if s.isDelayOpenOrder(command) {
 		log.Println("Delay open order")
 		return errors.New("Delay open order")
+	}
+
+	// GetPositionRisk
+	positionRisk, err := s.GetPositionRisk(command)
+	if err != nil {
+		return err
+	}
+
+	// Check Position Raito
+	var entryPrice, markPrice float64
+	if f, err := strconv.ParseFloat(positionRisk.EntryPrice, 64); err == nil {
+		entryPrice = f
+	}
+	if f, err := strconv.ParseFloat(positionRisk.MarkPrice, 64); err == nil {
+		markPrice = f
+	}
+
+	canOpenOrder, err := s.CheckPositionRatio(command, entryPrice, markPrice)
+	if !canOpenOrder {
+		return err
 	}
 
 	// Setup
@@ -401,6 +447,50 @@ func (s *service) isDelayOpenOrder(command *models.Command) bool {
 	return true
 }
 
+func (s *service) GetPositionRisk(command *models.Command) (*futures.PositionRisk, error) {
+
+	orders, err := s.client.NewGetPositionRiskService().Symbol(command.Symbol).
+		Do(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	var result *futures.PositionRisk
+	for _, o := range orders {
+		if o.PositionSide == string(command.Side) {
+			result = o
+			break
+		}
+	}
+
+	return result, nil
+}
+
+// True= Can open order, False= Skip open order
+func (s *service) CheckPositionRatio(command *models.Command, entryPrice, markPrice float64) (bool, error) {
+	var isOverRatio bool
+	var roe float64
+
+	if command.Side == futures.PositionSideTypeShort { // Short
+		roe = (entryPrice - markPrice) / entryPrice * 100
+	} else if command.Side == futures.PositionSideTypeLong { // Long
+		roe = (markPrice - entryPrice) / markPrice * 100
+	}
+
+	if roe < s.config.WinOrLossRatio {
+		isOverRatio = true
+	}
+
+	if !isOverRatio {
+		msg := fmt.Sprintf("Side: %s, Entry Price: %f, Mark Price: %f, ROE%: %f", command.Side, entryPrice, markPrice, roe)
+		return isOverRatio, errors.New(msg)
+	}
+
+	return isOverRatio, nil
+}
+
+// Helper
 func round(num float64) int {
 	return int(num + math.Copysign(0.5, num))
 }

@@ -8,6 +8,7 @@ type EnvConfig struct {
 	Leverage             int
 	TakeProfitPercentage float64
 	StopLossPercentage   float64
+	WinOrLossRatio       float64
 	Port                 string
 	TokenWhitelist       []string
 }

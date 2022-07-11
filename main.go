@@ -48,6 +48,10 @@ func init() {
 		config.StopLossPercentage = f
 	}
 
+	if f, err := strconv.ParseFloat(os.Getenv("WIN_OR_LOSS_RATIO"), 32); err == nil {
+		config.WinOrLossRatio = f
+	}
+
 	tokenWhitelist := strings.Split(os.Getenv("TOKEN_WHITELIST"), ",")
 	config.TokenWhitelist = tokenWhitelist
 }
@@ -60,9 +64,10 @@ func main() {
 
 	futuresClient := binance.NewFuturesClient(config.BinanceAPIKey, config.BinanceAPISecret) // USDT-M Futures
 
-	var futureSvc future.Service
-	futureSvc = future.NewService(&config, stateOrderBooks, futuresClient)
+	// Services
+	futureSvc := future.NewService(&config, stateOrderBooks, futuresClient)
 
+	// Server
 	srv := server.New(futuresClient, futureSvc)
 
 	errs := make(chan error, 2)
