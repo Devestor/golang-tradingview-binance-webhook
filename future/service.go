@@ -499,6 +499,12 @@ func (s *service) GetPositionRisk(command *models.Command) (*futures.PositionRis
 
 // True= Can open order, False= Skip open order
 func (s *service) CheckPositionRatio(command *models.Command, entryPrice, markPrice float64) (bool, error) {
+
+	// Don't have Open order
+	if entryPrice == 0 {
+		return true, nil
+	}
+
 	var isOverRatio bool
 	var roe float64
 
