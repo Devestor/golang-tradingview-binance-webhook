@@ -278,6 +278,36 @@ func (s *service) Short(command *models.Command) error {
 
 func (s *service) tradeSetup(command *models.Command) {
 
+	// const { symbol, onlyOneOrder } = command
+
+	// const positionOrders = await this.getPositionOrders(command)
+
+	// if (onlyOneOrder && positionOrders.length > 0) {
+	//   return false
+	// }
+
+	// await this.cancelOpenOrders(command, positionOrders)
+
+	openOrders, err := s.client.NewListOpenOrdersService().Symbol(command.Symbol).Do(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if command.OnlyOneOrder && len(openOrders) > 0 {
+		fmt.Println("Skipping open order")
+		return
+	} else if len(openOrders) > 0 {
+		for _, o := range openOrders {
+			_, err := s.client.NewCancelOrderService().Symbol(o.Symbol).OrderID(o.OrderID).Do(context.Background())
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Println("Cancal Order Symbol: ", o.Symbol, ", Order ID: ", o.OrderID)
+		}
+	}
+
 	// Change Leverage
 	respChangeLeverage, err := s.client.NewChangeLeverageService().
 		Symbol(command.Symbol).
@@ -483,7 +513,7 @@ func (s *service) CheckPositionRatio(command *models.Command, entryPrice, markPr
 	}
 
 	if !isOverRatio {
-		msg := fmt.Sprintf("Side: %s, Entry Price: %f, Mark Price: %f, ROE%: %f", command.Side, entryPrice, markPrice, roe)
+		msg := fmt.Sprintf("Skipping Order: Side: %s, Entry Price: %f, Mark Price: %f, ROE%: %f", command.Side, entryPrice, markPrice, toFixed(roe, 2))
 		return isOverRatio, errors.New(msg)
 	}
 

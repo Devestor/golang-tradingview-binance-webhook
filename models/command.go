@@ -5,10 +5,11 @@ import (
 )
 
 type Command struct {
-	Symbol    string
-	Side      futures.PositionSideType
-	AmountUSD int64
-	IsTP      bool
-	IsSL      bool
-	IsCheckWL bool
+	Symbol       string
+	Side         futures.PositionSideType
+	AmountUSD    int64
+	IsTP         bool
+	IsSL         bool
+	IsCheckWL    bool
+	OnlyOneOrder bool
 }

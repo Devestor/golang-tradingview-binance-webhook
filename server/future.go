@@ -104,6 +104,10 @@ func parseRawCommand(rawCommand string) (*models.Command, error) {
 		c.IsCheckWL = arr[5] == "true" // 6
 	}
 
+	if len(arr) >= 7 {
+		c.OnlyOneOrder = arr[6] == "true" // 7
+	}
+
 	// Side
 	if strings.ToUpper(arr[1]) == strings.ToUpper(string(futures.PositionSideTypeLong)) {
 		c.Side = futures.PositionSideTypeLong
