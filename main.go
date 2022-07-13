@@ -48,6 +48,10 @@ func init() {
 		config.StopLossPercentage = f
 	}
 
+	if f, err := strconv.ParseFloat(os.Getenv("LIMIT_MARGIN_SIZE"), 32); err == nil {
+		config.LimitMarginSize = f
+	}
+
 	if f, err := strconv.ParseFloat(os.Getenv("WIN_OR_LOSS_RATIO"), 32); err == nil {
 		config.WinOrLossRatio = f
 	}
