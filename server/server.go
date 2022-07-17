@@ -29,6 +29,7 @@ func New(
 		futureSvc: futureSvc,
 	}
 
+	// Routers
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 

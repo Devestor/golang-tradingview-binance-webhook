@@ -12,6 +12,7 @@ type EnvConfig struct {
 	WinOrLossRatio       float64
 	Port                 string
 	TokenWhitelist       []string
+	LineNotifyToken      string
 }
 
 type OrderBook struct {

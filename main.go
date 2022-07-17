@@ -10,11 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/adshao/go-binance/v2"
+	"github.com/jasonlvhit/gocron"
 	"github.com/joho/godotenv"
 
+	"tradingview-binance-webhook/client"
 	"tradingview-binance-webhook/future"
+	_lineService "tradingview-binance-webhook/line/service"
 	"tradingview-binance-webhook/models"
 	"tradingview-binance-webhook/server"
 )
@@ -35,6 +39,7 @@ func init() {
 		BinanceAPIKey:    os.Getenv("BINANCE_API_KEY"),
 		BinanceAPISecret: os.Getenv("BINANCE_API_SECRET"),
 		Port:             os.Getenv("PORT"),
+		LineNotifyToken:  os.Getenv("LINE_NOTIFY_TOKEN"),
 	}
 
 	intLeverage, _ := strconv.ParseInt(os.Getenv("LEVERAGE"), 0, 8)
@@ -64,12 +69,23 @@ func main() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
+	// Http Client
+	c := &http.Client{
+		Timeout: time.Duration(30 * time.Second),
+	}
+	cc := client.NewClient(c)
+
+	scheduler := gocron.NewScheduler()
+
+	// Line
+	lineService := _lineService.NewLineService(config.LineNotifyToken, cc)
+
 	stateOrderBooks := make(map[string]*models.OrderBook)
 
 	futuresClient := binance.NewFuturesClient(config.BinanceAPIKey, config.BinanceAPISecret) // USDT-M Futures
 
 	// Services
-	futureSvc := future.NewService(&config, stateOrderBooks, futuresClient)
+	futureSvc := future.NewService(&config, stateOrderBooks, futuresClient, lineService, scheduler)
 
 	// Server
 	srv := server.New(futuresClient, futureSvc)

@@ -5,13 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"strconv"
 	"time"
 
 	"github.com/adshao/go-binance/v2/futures"
+	"github.com/jasonlvhit/gocron"
 
+	"tradingview-binance-webhook/line"
 	"tradingview-binance-webhook/models"
+	"tradingview-binance-webhook/utils"
 )
 
 type Service interface {
@@ -19,6 +21,10 @@ type Service interface {
 	Short(command *models.Command) error
 	GetPositionRisk(command *models.Command) (*futures.PositionRisk, error)
 	CheckPositionRatio(command *models.Command, positionRisk *futures.PositionRisk) (bool, error)
+	calculateRealizedPnl() (*models.CalculateRealizedPnl, error)
+
+	startScheduler()
+	listenUserData() error
 
 	tradeSetup(command *models.Command)
 	openOrder(symbol, quantity string, side futures.SideType, positionSide futures.PositionSideType)
@@ -32,18 +38,33 @@ type service struct {
 	stateOrderBooks map[string]*models.OrderBook
 	config          *models.EnvConfig
 	client          *futures.Client
+	lineService     line.Service
+	scheduler       *gocron.Scheduler
 }
 
 func NewService(
 	config *models.EnvConfig,
 	stateOrderBooks map[string]*models.OrderBook,
 	client *futures.Client,
+	lineService line.Service,
+	scheduler *gocron.Scheduler,
 ) Service {
-	return &service{
+
+	s := &service{
 		config:          config,
 		stateOrderBooks: stateOrderBooks,
 		client:          client,
+		lineService:     lineService,
+		scheduler:       scheduler,
 	}
+
+	// Scheduler
+	go s.startScheduler()
+
+	// Web Socket
+	go s.listenUserData()
+
+	return s
 }
 
 func (s *service) Long(command *models.Command) error {
@@ -296,12 +317,14 @@ func (s *service) tradeSetup(command *models.Command) {
 		return
 	} else if len(openOrders) > 0 {
 		for _, o := range openOrders {
-			_, err := s.client.NewCancelOrderService().Symbol(o.Symbol).OrderID(o.OrderID).Do(context.Background())
-			if err != nil {
-				fmt.Println(err)
-				return
+			if command.Side == o.PositionSide {
+				_, err := s.client.NewCancelOrderService().Symbol(o.Symbol).OrderID(o.OrderID).Do(context.Background())
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				fmt.Println("Cancal Order Symbol: ", o.Symbol, ", Order ID: ", o.OrderID)
 			}
-			fmt.Println("Cancal Order Symbol: ", o.Symbol, ", Order ID: ", o.OrderID)
 		}
 	}
 
@@ -385,9 +408,9 @@ func (s *service) calculateQuantity(symbol string, amountUSD int64, quantityPrec
 		currentPrice = s
 	}
 
-	quantity := toFixed(float64(amountUSD)/currentPrice, quantityPrecision)
+	quantity := utils.ToFixed(float64(amountUSD)/currentPrice, quantityPrecision)
 	leverageQuantity := quantity * float64(s.config.Leverage)
-	fmt.Printf("Default Quantity: %f, Leverage Quantity: %f\n", quantity, leverageQuantity)
+	// fmt.Printf("Default Quantity: %f, Leverage Quantity: %f\n", quantity, leverageQuantity)
 	return leverageQuantity
 }
 
@@ -419,15 +442,15 @@ func (s *service) calculateTpSL(symbol string, side futures.PositionSideType, pr
 		stopLoss := (fPrice * (100 - s.config.StopLossPercentage)) / 100
 		takeProfit := (fPrice * (100 + s.config.TakeProfitPercentage)) / 100
 
-		fmt.Printf("Long| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)))
-		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)), nil
+		// fmt.Printf("Long| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", utils.ToFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", utils.ToFixed(takeProfit, pricePrecision)))
+		return fmt.Sprintf("%f", utils.ToFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", utils.ToFixed(takeProfit, pricePrecision)), nil
 	} else if side == "SHORT" {
 
 		stopLoss := (fPrice * (100 + s.config.StopLossPercentage)) / 100
 		takeProfit := (fPrice * (100 - s.config.TakeProfitPercentage)) / 100
 
-		fmt.Printf("Short| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)))
-		return fmt.Sprintf("%f", toFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", toFixed(takeProfit, pricePrecision)), nil
+		// fmt.Printf("Short| Stop Loss: %s, Take Profit: %s\n", fmt.Sprintf("%f", utils.ToFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", utils.ToFixed(takeProfit, pricePrecision)))
+		return fmt.Sprintf("%f", utils.ToFixed(stopLoss, pricePrecision)), fmt.Sprintf("%f", utils.ToFixed(takeProfit, pricePrecision)), nil
 	}
 
 	return "0", "0", nil
@@ -455,7 +478,7 @@ func (s *service) isDelayOpenOrder(command *models.Command) bool {
 	}
 
 	// compare
-	diff = time.Now().Sub(s.stateOrderBooks[sk].TimeStamp)
+	diff = time.Since(s.stateOrderBooks[sk].TimeStamp)
 	fmt.Println("Key: ", sk)
 	fmt.Println("Diff time: ", diff)
 	fmt.Println("Diff time seconds: ", diff.Seconds())
@@ -523,20 +546,190 @@ func (s *service) CheckPositionRatio(command *models.Command, positionRisk *futu
 		isOverRatio = true
 	}
 
-	if isOverRatio == false {
-		msg := fmt.Sprintf("Skipping Order: Side: %s, Entry Price: %f, Mark Price: %f, ROE%: %f", command.Side, entryPrice, markPrice, toFixed(roe, 2))
+	// isOverRatio == false
+	if !isOverRatio {
+		msg := fmt.Sprintf("Skipping Order: Side: %s, Entry Price: %f, Mark Price: %f, ROE: %.2f", command.Side, entryPrice, markPrice, utils.ToFixed(roe, 2))
 		return isOverRatio, errors.New(msg)
 	}
 
 	return isOverRatio, nil
 }
 
-// Helper
-func round(num float64) int {
-	return int(num + math.Copysign(0.5, num))
+func (s *service) listenUserData() error {
+	log.Println("streaming user data...")
+
+	wsHandler := func(event *futures.WsUserDataEvent) {
+		if event.Event == futures.UserDataEventTypeOrderTradeUpdate {
+			// TP
+			if event.OrderTradeUpdate.ExecutionType == futures.OrderExecutionTypeTrade && event.OrderTradeUpdate.OriginalType == futures.OrderTypeTakeProfitMarket {
+
+				msg := fmt.Sprintf(`%s [%s] 🔴 ปิด position 
+กำไร $%s
+ค่าคอมมิสชั่น: $%s
+			`,
+					event.OrderTradeUpdate.Symbol,
+					event.OrderTradeUpdate.PositionSide,
+					event.OrderTradeUpdate.RealizedPnL,
+					event.OrderTradeUpdate.Commission,
+				)
+
+				s.lineService.Notify(msg)
+
+				realizedPnl, err := s.calculateRealizedPnl()
+				if err != nil {
+					log.Println("RealizedPnl: ", err)
+				}
+
+				msg2 := fmt.Sprintf(`🔰🚸🎏🧬🧪 Net Profit
+กำไร: %.2f
+ขาดทุน: %.2f
+Commission: %.2f
+กำไรรวมวันนี้ %.2f`,
+					realizedPnl.Profit,
+					realizedPnl.Loss,
+					realizedPnl.Commission,
+					realizedPnl.NetProfit,
+				)
+
+				s.lineService.Notify(msg2)
+
+				log.Printf("### TP 1 ###: %+v\n\n", event)
+			} else {
+				// Open Order
+				if event.OrderTradeUpdate.ExecutionType == futures.OrderExecutionTypeTrade {
+					var averagePrice, originalQty float64
+					if f, err := strconv.ParseFloat(event.OrderTradeUpdate.AveragePrice, 32); err == nil {
+						averagePrice = f
+					}
+					if f, err := strconv.ParseFloat(event.OrderTradeUpdate.OriginalQty, 32); err == nil {
+						originalQty = f
+					}
+
+					msg := fmt.Sprintf(`%s [%s] ✅ เปิด position
+ราคา: $%s
+จำนวน: %s
+จำนวนUSD: $%.2f
+ค่าคอมมิสชั่น: $%s
+					`,
+						event.OrderTradeUpdate.Symbol,
+						event.OrderTradeUpdate.PositionSide,
+						event.OrderTradeUpdate.AveragePrice,
+						event.OrderTradeUpdate.OriginalQty,
+						averagePrice*originalQty,
+						event.OrderTradeUpdate.Commission,
+					)
+
+					s.lineService.Notify(msg)
+					log.Printf("### OPEN 2 ###: %+v\n\n", event)
+
+				} else {
+					s.lineService.Notify(fmt.Sprintf("`## Event: %s, Time: %d", event.Event, event.Time))
+					log.Printf("### 3 ###: %+v\n\n", event)
+				}
+			}
+		} else {
+			if event.Event == futures.UserDataEventTypeListenKeyExpired {
+				s.lineService.Notify(`Event:  🔴 KeyExpired  🔴`)
+				return
+			}
+
+			s.lineService.Notify(fmt.Sprintf("`#4 Event: %s, Time: %d", event.Event, event.Time))
+			log.Printf("### 4 ###: %+v\n\n", event)
+		}
+	}
+
+	errHandler := func(err error) {
+		log.Println("errHandler: ", err)
+	}
+
+	listenKey, err := s.client.NewStartUserStreamService().Do(context.Background())
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	err = s.client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	log.Println("listenKey: ", listenKey)
+
+	// futures.WebsocketKeepalive = true
+	// futures.WebsocketTimeout = time.Second * 1
+	_, _, err = futures.WsUserDataServe(listenKey, wsHandler, errHandler)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	return nil
 }
 
-func toFixed(num float64, precision int) float64 {
-	output := math.Pow(10, float64(precision))
-	return float64(round(num*output)) / output
+func (s *service) calculateRealizedPnl() (*models.CalculateRealizedPnl, error) {
+
+	var profit, loss, commission float64
+	startTime := utils.EpochStartDate(time.Now()).UnixMilli()
+	endTime := utils.EpochEndDate(time.Now()).UnixMilli()
+
+	trades, err := s.client.NewListAccountTradeService().StartTime(startTime).EndTime(endTime).Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range trades {
+		var realizedPnl, com float64
+		if f, err := strconv.ParseFloat(v.RealizedPnl, 64); err == nil {
+			realizedPnl = f
+		}
+
+		if f, err := strconv.ParseFloat(v.Commission, 64); err == nil {
+			com = f
+		}
+
+		if realizedPnl > 0 {
+			profit += realizedPnl
+			commission += com
+		} else if realizedPnl < 0 {
+			loss += realizedPnl
+			commission += com
+		}
+	}
+
+	return &models.CalculateRealizedPnl{
+		Profit:     profit,
+		Loss:       loss,
+		Commission: commission,
+		NetProfit:  (profit - loss) - commission,
+	}, nil
+
+}
+
+func (s *service) startScheduler() {
+	log.Println("Start scheduler...")
+	// gocron.Every(1).Day().At("10:30").Do(task)
+	err := s.scheduler.Every(1).Day().At("23:59").Do(func() {
+
+		realizedPnl, err := s.calculateRealizedPnl()
+		if err != nil {
+			log.Println("RealizedPnl: ", err)
+		}
+		// 🚸🎏🧬🧪
+		msg2 := fmt.Sprintf(`🔰 DAILY REALIZED PNL
+กำไร: %.2f
+ขาดทุน: %.2f
+Commission: %.2f
+กำไรรวมวันนี้ %.2f`,
+			realizedPnl.Profit,
+			realizedPnl.Loss,
+			realizedPnl.Commission,
+			realizedPnl.NetProfit,
+		)
+
+		s.lineService.Notify(msg2)
+	})
+
+	// Start all the pending jobs
+	<-s.scheduler.Start()
+	log.Println(err)
 }
