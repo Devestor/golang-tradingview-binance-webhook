@@ -40,6 +40,7 @@ type service struct {
 	client          *futures.Client
 	lineService     line.Service
 	scheduler       *gocron.Scheduler
+	listenKey       string
 }
 
 func NewService(
@@ -558,6 +559,15 @@ func (s *service) CheckPositionRatio(command *models.Command, positionRisk *futu
 func (s *service) listenUserData() error {
 	log.Println("streaming user data...")
 
+	listenKey, err := s.client.NewStartUserStreamService().Do(context.Background())
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	s.listenKey = listenKey
+	log.Println("listenKey: ", listenKey)
+
 	wsHandler := func(event *futures.WsUserDataEvent) {
 		if event.Event == futures.UserDataEventTypeOrderTradeUpdate {
 			// TP
@@ -623,17 +633,17 @@ Commission: %.2f
 					log.Printf("### OPEN 2 ###: %+v\n\n", event)
 
 				} else {
-					s.lineService.Notify(fmt.Sprintf("`## Event: %s, Time: %d", event.Event, event.Time))
+					s.lineService.Notify(fmt.Sprintf("`## Event: %s, Time: %d, Commission: %s", event.Event, event.Time, event.OrderTradeUpdate.Commission))
 					log.Printf("### 3 ###: %+v\n\n", event)
 				}
 			}
 		} else {
 			if event.Event == futures.UserDataEventTypeListenKeyExpired {
-				s.lineService.Notify(`Event:  🔴 KeyExpired  🔴`)
+				s.lineService.Notify(fmt.Sprintf("`Event:  🔴 KeyExpired 🔴, Time: %d", event.Time))
 				return
 			}
 
-			s.lineService.Notify(fmt.Sprintf("`#4 Event: %s, Time: %d", event.Event, event.Time))
+			s.lineService.Notify(fmt.Sprintf("`#4 Event: %s, Time: %d, Commission: %s", event.Event, event.Time, event.OrderTradeUpdate.Commission))
 			log.Printf("### 4 ###: %+v\n\n", event)
 		}
 	}
@@ -642,21 +652,6 @@ Commission: %.2f
 		log.Println("errHandler: ", err)
 	}
 
-	listenKey, err := s.client.NewStartUserStreamService().Do(context.Background())
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-
-	err = s.client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-	log.Println("listenKey: ", listenKey)
-
-	// futures.WebsocketKeepalive = true
-	// futures.WebsocketTimeout = time.Second * 1
 	_, _, err = futures.WsUserDataServe(listenKey, wsHandler, errHandler)
 	if err != nil {
 		log.Println(err)
@@ -728,6 +723,23 @@ Commission: %.2f
 
 		s.lineService.Notify(msg2)
 	})
+	if err != nil {
+		log.Println("startScheduler", err)
+	}
+
+	err = s.scheduler.Every(30).Minutes().Do(func() {
+		s.lineService.Notify("🧪 extend listenKey'" + s.listenKey)
+		err := s.client.NewKeepaliveUserStreamService().ListenKey(s.listenKey).Do(context.Background())
+		if err != nil {
+			log.Println(err)
+		}
+	})
+
+	// err = s.client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(context.Background())
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return err
+	// }
 
 	// Start all the pending jobs
 	<-s.scheduler.Start()

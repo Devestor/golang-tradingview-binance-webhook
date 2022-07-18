@@ -75,7 +75,14 @@ func main() {
 	}
 	cc := client.NewClient(c)
 
+	// NewScheduler
 	scheduler := gocron.NewScheduler()
+	location, err := time.LoadLocation("Asia/Bangkok")
+	if err != nil {
+		log.Println("Unfortunately can't load a location")
+	} else {
+		scheduler.ChangeLoc(location)
+	}
 
 	// Line
 	lineService := _lineService.NewLineService(config.LineNotifyToken, cc)
